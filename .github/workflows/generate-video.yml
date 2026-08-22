@@ -58,7 +58,7 @@ jobs:
       - name: Generate video
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          GROQ_MODEL: llama-3.3-70b-versatile
+          GROQ_MODEL: openai/gpt-oss-120b
           VIDEO_TOPIC: ${{ github.event.inputs.topic || 'zombie apocalypse survival manhwa — a lone survivor in a ruined Indian city' }}
           NUM_SCENES: ${{ github.event.inputs.num_scenes || '12' }}
         run: |
