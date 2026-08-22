@@ -27,8 +27,18 @@ from openai import OpenAI
 
 # --- Configuration ---------------------------------------------------------
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "").strip()
-GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.1-8b-instant")
+GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
+
+# Fallback model list — if the primary model 404s or is unavailable, try these.
+# Groq periodically deprecates/renames models; this makes the pipeline resilient.
+FALLBACK_MODELS = [
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+    "gemma2-9b-it",
+    "llama3-8b-8192",
+    "llama3-70b-8192",
+]
 
 # Number of scenes — tuned so total narration lands at ~2 minutes.
 NUM_SCENES = int(os.environ.get("NUM_SCENES", "12"))
@@ -87,47 +97,58 @@ def generate_story(out_path: Path) -> dict:
         "cinematic composition, high quality'."
     )
 
+    # Try the primary model first, then fall back through FALLBACK_MODELS
+    models_to_try = [GROQ_MODEL] + [m for m in FALLBACK_MODELS if m != GROQ_MODEL]
     last_err: Exception | None = None
-    for attempt in range(1, 4):
-        try:
-            resp = client.chat.completions.create(
-                model=GROQ_MODEL,
-                messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": user_prompt},
-                ],
-                temperature=0.8,
-                response_format={"type": "json_object"},
-                max_tokens=2048,
-            )
-            raw = resp.choices[0].message.content or ""
-            story = json.loads(raw)
-            if "scenes" not in story or not isinstance(story["scenes"], list):
-                raise ValueError("Missing 'scenes' array in LLM response")
-            # Pad/trim to exactly NUM_SCENES
-            scenes = story["scenes"][:NUM_SCENES]
-            while len(scenes) < NUM_SCENES:
-                scenes.append(
-                    {
-                        "narration": "Aur tabhi, sab kuch badal gaya.",
-                        "image_prompt": (
-                            "lone survivor looking at burning Indian city skyline, "
-                            "manhwa panel, dramatic lighting, detailed line art, "
-                            "cinematic composition, high quality"
-                        ),
-                    }
-                )
-            story["scenes"] = scenes
-            out_path.write_text(json.dumps(story, ensure_ascii=False, indent=2))
-            print(f"[story_gen] Wrote {len(scenes)} scenes to {out_path}")
-            return story
-        except Exception as exc:  # noqa: BLE001
-            last_err = exc
-            wait = 2 ** attempt
-            print(f"[story_gen] attempt {attempt} failed: {exc}; retrying in {wait}s")
-            time.sleep(wait)
 
-    raise SystemExit(f"[story_gen] Failed after retries: {last_err}")
+    for model in models_to_try:
+        print(f"[story_gen] Trying model: {model}")
+        for attempt in range(1, 4):
+            try:
+                resp = client.chat.completions.create(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    temperature=0.8,
+                    response_format={"type": "json_object"},
+                    max_tokens=2048,
+                )
+                raw = resp.choices[0].message.content or ""
+                story = json.loads(raw)
+                if "scenes" not in story or not isinstance(story["scenes"], list):
+                    raise ValueError("Missing 'scenes' array in LLM response")
+                # Pad/trim to exactly NUM_SCENES
+                scenes = story["scenes"][:NUM_SCENES]
+                while len(scenes) < NUM_SCENES:
+                    scenes.append(
+                        {
+                            "narration": "Aur tabhi, sab kuch badal gaya.",
+                            "image_prompt": (
+                                "lone survivor looking at burning Indian city skyline, "
+                                "manhwa panel, dramatic lighting, detailed line art, "
+                                "cinematic composition, high quality"
+                            ),
+                        }
+                    )
+                story["scenes"] = scenes
+                out_path.write_text(json.dumps(story, ensure_ascii=False, indent=2))
+                print(f"[story_gen] Wrote {len(scenes)} scenes to {out_path} (model: {model})")
+                return story
+            except Exception as exc:  # noqa: BLE001
+                last_err = exc
+                err_str = str(exc)
+                # If model not found, skip to next model immediately
+                if "model_not_found" in err_str or "does not exist" in err_str:
+                    print(f"[story_gen] Model '{model}' not available, trying next...")
+                    break
+                # For other errors (rate limit, timeout), retry with backoff
+                wait = 2 ** attempt
+                print(f"[story_gen] attempt {attempt} failed: {exc}; retrying in {wait}s")
+                time.sleep(wait)
+
+    raise SystemExit(f"[story_gen] Failed after trying all models. Last error: {last_err}")
 
 
 if __name__ == "__main__":
