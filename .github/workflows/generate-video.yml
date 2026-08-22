@@ -1,0 +1,77 @@
+name: Generate Zombie Manhwa Video
+
+on:
+  # Manual trigger from the Actions tab — click "Run workflow"
+  workflow_dispatch:
+    inputs:
+      topic:
+        description: 'Video topic / story theme'
+        required: false
+        default: 'zombie apocalypse survival manhwa — a lone survivor in a ruined Indian city'
+        type: string
+      num_scenes:
+        description: 'Number of scenes (keep 8-14 for ~2 min video)'
+        required: false
+        default: '12'
+        type: string
+  # Also run on pushes to main that change the pipeline itself (CI smoke test)
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/**'
+      - '.github/workflows/generate-video.yml'
+      - 'requirements.txt'
+
+# Prevent overlapping runs from burning free minutes
+concurrency:
+  group: video-gen
+  cancel-in-progress: true
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install system dependencies (FFmpeg + fonts)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg fonts-dejavu fonts-liberation
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Verify ffmpeg
+        run: ffmpeg -version
+
+      - name: Generate video
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GROQ_MODEL: llama-3.1-8b-instant
+          VIDEO_TOPIC: ${{ github.event.inputs.topic || 'zombie apocalypse survival manhwa — a lone survivor in a ruined Indian city' }}
+          NUM_SCENES: ${{ github.event.inputs.num_scenes || '12' }}
+        run: |
+          python scripts/main.py --output output/final_video.mp4 --workdir build
+
+      - name: Upload video artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zombie-manhwa-video
+          path: |
+            output/
+            build/story.json
+            build/images/
+          retention-days: 14
+          if-no-files-found: warn
