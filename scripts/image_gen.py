@@ -1,6 +1,8 @@
 """
-Image generator — downloads one high-quality manhwa-style panel per scene
-from Pollinations.ai (FLUX model). Free, no API key, hosted on their servers.
+Image generator — generates high-quality manhwa-style panels per scene.
+
+Primary: NVIDIA NIM API (FLUX.1-dev) — higher quality, sharper lines.
+Fallback: Pollinations.ai (FLUX) — free, no API key, unlimited.
 
 Images are fetched at 1920x1080 (landscape, matching video output) for
 maximum quality. Retries with exponential backoff. Deterministic seed per
@@ -9,6 +11,7 @@ scene keeps visuals consistent across runs.
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import sys
@@ -19,12 +22,74 @@ import requests
 from PIL import Image
 
 POLLINATIONS_URL = "https://image.pollinations.ai/prompt/{prompt}"
+NVIDIA_URL = "https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux.1-dev"
 WIDTH = int(os.environ.get("IMG_WIDTH", "1920"))
 HEIGHT = int(os.environ.get("IMG_HEIGHT", "1080"))
 TIMEOUT = 120
+NVIDIA_API_KEY = os.environ.get("NVIDIA_API_KEY", "")
 
 
-def _fetch(prompt: str, dest: Path, seed: int) -> bool:
+def _fetch_nvidia(prompt: str, dest: Path, seed: int) -> bool:
+    """Generate image via NVIDIA NIM FLUX.1-dev API."""
+    if not NVIDIA_API_KEY:
+        print("[image_gen] NVIDIA_API_KEY not set, skipping NVIDIA")
+        return False
+
+    headers = {
+        "Authorization": f"Bearer {NVIDIA_API_KEY}",
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "prompt": prompt,
+        "cfg_scale": 4.5,
+        "steps": 30,
+        "seed": seed,
+        "width": WIDTH,
+        "height": HEIGHT,
+    }
+
+    for attempt in range(1, 4):
+        try:
+            r = requests.post(NVIDIA_URL, headers=headers, json=payload, timeout=180)
+            if r.status_code == 200:
+                data = r.json()
+                # NVIDIA returns base64 image in different possible fields
+                img_b64 = None
+                if "artifacts" in data and len(data["artifacts"]) > 0:
+                    img_b64 = data["artifacts"][0].get("base64")
+                elif "images" in data and len(data["images"]) > 0:
+                    img_b64 = data["images"][0].get("base64")
+                elif "data" in data and len(data["data"]) > 0:
+                    img_b64 = data["data"][0].get("b64_json")
+                elif "b64_json" in data:
+                    img_b64 = data["b64_json"]
+                elif "image" in data:
+                    img_b64 = data["image"]
+
+                if img_b64:
+                    img_bytes = base64.b64decode(img_b64)
+                    if len(img_bytes) > 10000:
+                        dest.write_bytes(img_bytes)
+                        with Image.open(dest) as im:
+                            im.verify()
+                        print(f"[image_gen] NVIDIA OK {dest.name} "
+                              f"(attempt {attempt}, {len(img_bytes)} bytes)")
+                        return True
+
+            print(f"[image_gen] NVIDIA {dest.name} attempt {attempt}: "
+                  f"status={r.status_code}, body={r.text[:300]}")
+
+        except Exception as exc:  # noqa: BLE001
+            print(f"[image_gen] NVIDIA {dest.name} attempt {attempt} error: {exc}")
+
+        time.sleep(3 * attempt)
+
+    return False
+
+
+def _fetch_pollinations(prompt: str, dest: Path, seed: int) -> bool:
+    """Generate image via Pollinations.ai FLUX (free, no key)."""
     url = POLLINATIONS_URL.format(prompt=requests.utils.quote(prompt))
     url += f"?width={WIDTH}&height={HEIGHT}&seed={seed}&nologo=true&model=flux"
     for attempt in range(1, 6):
@@ -32,15 +97,28 @@ def _fetch(prompt: str, dest: Path, seed: int) -> bool:
             r = requests.get(url, timeout=TIMEOUT)
             if r.status_code == 200 and len(r.content) > 10000:
                 dest.write_bytes(r.content)
-                # Validate it's a real image
                 with Image.open(dest) as im:
                     im.verify()
                 return True
-            print(f"[image_gen] {dest.name} attempt {attempt}: "
+            print(f"[image_gen] Pollinations {dest.name} attempt {attempt}: "
                   f"status={r.status_code}, bytes={len(r.content)}")
         except Exception as exc:  # noqa: BLE001
-            print(f"[image_gen] {dest.name} attempt {attempt} error: {exc}")
-        time.sleep(2 ** attempt)
+            print(f"[image_gen] Pollinations {dest.name} attempt {attempt} error: {exc}")
+            time.sleep(2 ** attempt)
+    return False
+
+
+def _fetch(prompt: str, dest: Path, seed: int) -> bool:
+    """Try NVIDIA first, fall back to Pollinations."""
+    # Primary: NVIDIA NIM (FLUX.1-dev) — better quality
+    if _fetch_nvidia(prompt, dest, seed):
+        return True
+
+    # Fallback: Pollinations.ai (FLUX) — free, unlimited
+    print(f"[image_gen] NVIDIA failed for {dest.name}, trying Pollinations...")
+    if _fetch_pollinations(prompt, dest, seed):
+        return True
+
     return False
 
 
