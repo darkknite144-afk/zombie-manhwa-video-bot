@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.pyc
+
+# Build artifacts
+build/
+output/
+*.mp4
+*.mp3
+*.wav
+
+# Generated assets (recreated each run)
+assets/
+images/
+audio/
+
+# Temp files
+*TEMP*
+*.m4a
