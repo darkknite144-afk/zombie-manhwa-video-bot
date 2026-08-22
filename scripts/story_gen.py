@@ -78,35 +78,41 @@ SYSTEM_PROMPT = (
     "expressions, shadows, silhouettes — not blood."
 )
 
-USER_PROMPT_TEMPLATE = (
-    "Create a {n}-scene 2-minute video script for: {topic}\n\n"
-    "STORY ARC REQUIREMENT:\n"
-    "- Scenes 1-3: SETUP — establish the fallen city, introduce the protagonist "
-    "(give them a name and distinct appearance), show the zombie threat.\n"
-    "- Scenes 4-{mid}: RISING ACTION — the survivor faces escalating danger. "
-    "Show their fear, their resourcefulness, encounters with zombies or other survivors.\n"
-    "- Scenes {mid+1}-{n-1}: CLIMAX — a major confrontation or turning point. "
-    "Highest tension, a decision that changes everything.\n"
-    "- Scene {n}: RESOLUTION + CLIFFHANGER — aftermath, the survivor's emotional "
-    "state, a hook for the next episode.\n\n"
-    "Return STRICT JSON only (no markdown fences):\n"
-    "{{\n"
-    '  "title": "catchy Hinglish title (max 6 words)",\n'
-    '  "protagonist": "detailed English description of the main character '
-    "(appearance, clothing, weapon, expression — used in ALL image prompts)\",\n"
-    '  "scenes": [\n'
-    '    {{"narration": "Hinglish narration (8-14 words, flows into next scene)", '
-    '"image_prompt": "detailed English prompt describing THIS scene\'s manhwa panel '
-    "using the protagonist description, background, lighting, action. End with: "
-    "solo leveling manhwa style, high detail, clean line art, dramatic shading, "
-    "vivid colors, cinematic composition, webtoon panel, masterpiece quality\"}}\n'
-    "    ...\n"
-    "  ]\n"
-    "}}\n\n"
-    "Exactly {n} scenes. Each narration must connect to the previous and next "
-    "scene like chapters of one story — NOT random disconnected sentences. "
-    "The narration should make the viewer feel they are watching a real story unfold."
-)
+
+def _build_user_prompt(n: int, topic: str) -> str:
+    """Build the user prompt with pre-computed scene boundaries."""
+    mid = max(4, n - 3)
+    climax_start = mid + 1
+    climax_end = n - 1
+    return (
+        f"Create a {n}-scene 2-minute video script for: {topic}\n\n"
+        f"STORY ARC REQUIREMENT:\n"
+        f"- Scenes 1-3: SETUP — establish the fallen city, introduce the protagonist "
+        f"(give them a name and distinct appearance), show the zombie threat.\n"
+        f"- Scenes 4-{mid}: RISING ACTION — the survivor faces escalating danger. "
+        f"Show their fear, their resourcefulness, encounters with zombies or other survivors.\n"
+        f"- Scenes {climax_start}-{climax_end}: CLIMAX — a major confrontation or turning point. "
+        f"Highest tension, a decision that changes everything.\n"
+        f"- Scene {n}: RESOLUTION + CLIFFHANGER — aftermath, the survivor's emotional "
+        f"state, a hook for the next episode.\n\n"
+        f"Return STRICT JSON only (no markdown fences):\n"
+        "{\n"
+        '  "title": "catchy Hinglish title (max 6 words)",\n'
+        '  "protagonist": "detailed English description of the main character '
+        '(appearance, clothing, weapon, expression — used in ALL image prompts)",\n'
+        '  "scenes": [\n'
+        '    {"narration": "Hinglish narration (8-14 words, flows into next scene)", '
+        '"image_prompt": "detailed English prompt describing THIS scene\'s manhwa panel '
+        'using the protagonist description, background, lighting, action. End with: '
+        'solo leveling manhwa style, high detail, clean line art, dramatic shading, '
+        'vivid colors, cinematic composition, webtoon panel, masterpiece quality"}\n'
+        "    ...\n"
+        "  ]\n"
+        "}\n\n"
+        f"Exactly {n} scenes. Each narration must connect to the previous and next "
+        f"scene like chapters of one story — NOT random disconnected sentences. "
+        f"The narration should make the viewer feel they are watching a real story unfold."
+    )
 
 
 def _client() -> OpenAI:
@@ -123,10 +129,7 @@ def generate_story(out_path: Path) -> dict:
     """Generate the story JSON and write it to out_path."""
     client = _client()
 
-    mid = max(4, NUM_SCENES - 3)
-    user_prompt = USER_PROMPT_TEMPLATE.format(
-        n=NUM_SCENES, topic=TOPIC, mid=mid
-    )
+    user_prompt = _build_user_prompt(NUM_SCENES, TOPIC)
 
     models_to_try = [GROQ_MODEL] + [m for m in FALLBACK_MODELS if m != GROQ_MODEL]
     last_err: Exception | None = None
