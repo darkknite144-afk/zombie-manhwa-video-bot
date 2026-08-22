@@ -27,17 +27,16 @@ from openai import OpenAI
 
 # --- Configuration ---------------------------------------------------------
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "").strip()
-GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
+GROQ_MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b")
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 
 # Fallback model list — if the primary model 404s or is unavailable, try these.
 # Groq periodically deprecates/renames models; this makes the pipeline resilient.
+# Current production models as of Aug 2026: openai/gpt-oss-120b, openai/gpt-oss-20b
 FALLBACK_MODELS = [
-    "llama-3.3-70b-versatile",
-    "llama-3.1-8b-instant",
-    "gemma2-9b-it",
-    "llama3-8b-8192",
-    "llama3-70b-8192",
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
+    "qwen/qwen3.6-27b",
 ]
 
 # Number of scenes — tuned so total narration lands at ~2 minutes.
@@ -139,8 +138,8 @@ def generate_story(out_path: Path) -> dict:
             except Exception as exc:  # noqa: BLE001
                 last_err = exc
                 err_str = str(exc)
-                # If model not found, skip to next model immediately
-                if "model_not_found" in err_str or "does not exist" in err_str:
+                # If model not found or decommissioned, skip to next model immediately
+                if "model_not_found" in err_str or "does not exist" in err_str or "model_decommissioned" in err_str:
                     print(f"[story_gen] Model '{model}' not available, trying next...")
                     break
                 # For other errors (rate limit, timeout), retry with backoff
