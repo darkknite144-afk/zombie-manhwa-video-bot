@@ -1,6 +1,6 @@
 """
 Video assembler — combines manhwa panels + narration audio into one 2-minute
-1080x1920 vertical (Shorts/Reels) video using MoviePy v2.x API.
+1920x1080 landscape (YouTube/TV) video using MoviePy v2.x API.
 
 Features:
   - Ken Burns slow zoom on each panel for cinematic feel (optional)
@@ -10,11 +10,6 @@ Features:
   - Ends with a 'Subscribe' end card
 
 Runs on CPU inside GitHub Actions (no GPU needed).
-
-MoviePy v2.x API notes:
-  - Use moviepy.video.io.ImageSequenceClip / ImageClip, not moviepy.editor
-  - resize() is now resized(); fadein/fadeout are with_effects()
-  - TextClip is constructed differently; use ImageClip + PIL for text
 """
 
 from __future__ import annotations
@@ -34,8 +29,6 @@ from moviepy.video.fx import FadeIn, FadeOut
 from PIL import Image, ImageDraw, ImageFont
 
 # Ensure FFmpeg binary is found even if not on system PATH
-# (works locally with imageio-ffmpeg, and on GitHub Actions which installs
-# ffmpeg via apt).
 try:
     import imageio_ffmpeg
     import moviepy.config as _mc
@@ -43,15 +36,15 @@ try:
 except Exception:
     pass
 
-# Output specs — vertical Shorts format
-W, H = 1080, 1920
+# Output specs — LANDSCAPE YouTube format
+W, H = 1920, 1080
 FPS = 24
 
 # Panel dwell time after narration (a beat of silence + image)
-PAD_TAIL = 0.6
+PAD_TAIL = 0.8
 # Title card / end card durations
-TITLE_DUR = 3.0
-END_DUR = 3.0
+TITLE_DUR = 4.0
+END_DUR = 4.0
 
 
 def _find_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
@@ -89,15 +82,15 @@ def _resize_cover(img_path: Path, target_w: int, target_h: int) -> Path:
 
 def _title_card(title: str, out_path: Path) -> Path:
     """Create a title card PNG."""
-    img = Image.new("RGB", (W, H), (8, 8, 12))
+    img = Image.new("RGB", (W, H), (5, 5, 10))
     draw = ImageDraw.Draw(img)
-    font = _find_font(64, bold=True)
+    font = _find_font(72, bold=True)
     words = title.split()
     lines, cur = [], ""
     for w in words:
         test = (cur + " " + w).strip()
         bbox = draw.textbbox((0, 0), test, font=font)
-        if bbox[2] - bbox[0] > W - 120:
+        if bbox[2] - bbox[0] > W - 200:
             if cur:
                 lines.append(cur)
             cur = w
@@ -105,13 +98,13 @@ def _title_card(title: str, out_path: Path) -> Path:
             cur = test
     if cur:
         lines.append(cur)
-    line_h = 80
+    line_h = 90
     total_h = line_h * len(lines)
     y = (H - total_h) // 2
     for line in lines:
         bbox = draw.textbbox((0, 0), line, font=font)
         tw = bbox[2] - bbox[0]
-        draw.text(((W - tw) // 2, y), line, fill=(240, 240, 250), font=font)
+        draw.text(((W - tw) // 2, y), line, fill=(255, 80, 80), font=font)
         y += line_h
     out_path.parent.mkdir(parents=True, exist_ok=True)
     img.save(out_path, "PNG")
@@ -119,18 +112,18 @@ def _title_card(title: str, out_path: Path) -> Path:
 
 
 def _end_card(out_path: Path) -> Path:
-    img = Image.new("RGB", (W, H), (8, 8, 12))
+    img = Image.new("RGB", (W, H), (5, 5, 10))
     draw = ImageDraw.Draw(img)
-    font = _find_font(80, bold=True)
+    font = _find_font(90, bold=True)
     text = "SUBSCRIBE"
     bbox = draw.textbbox((0, 0), text, font=font)
     tw = bbox[2] - bbox[0]
-    draw.text(((W - tw) // 2, H // 2 - 40), text, fill=(220, 60, 60), font=font)
+    draw.text(((W - tw) // 2, H // 2 - 50), text, fill=(220, 60, 60), font=font)
     sub = "Next episode coming soon..."
-    font2 = _find_font(44, bold=False)
+    font2 = _find_font(48, bold=False)
     bbox2 = draw.textbbox((0, 0), sub, font=font2)
     tw2 = bbox2[2] - bbox2[0]
-    draw.text(((W - tw2) // 2, H // 2 + 60), sub, fill=(200, 200, 200), font=font2)
+    draw.text(((W - tw2) // 2, H // 2 + 60), sub, fill=(180, 180, 180), font=font2)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     img.save(out_path, "PNG")
     return out_path
@@ -138,14 +131,14 @@ def _end_card(out_path: Path) -> Path:
 
 def _subtitle_image(text: str, out_path: Path) -> Path:
     """Render subtitle text as a transparent PNG for compositing."""
-    font = _find_font(42, bold=True)
-    # Word-wrap to W-160 px
+    font = _find_font(48, bold=True)
+    # Word-wrap to W-300 px
     words = text.split()
     lines, cur = [], ""
     for w in words:
         test = (cur + " " + w).strip()
         bbox = ImageDraw.Draw(Image.new("RGB", (1, 1))).textbbox((0, 0), test, font=font)
-        if bbox[2] - bbox[0] > W - 160:
+        if bbox[2] - bbox[0] > W - 300:
             if cur:
                 lines.append(cur)
             cur = w
@@ -153,9 +146,9 @@ def _subtitle_image(text: str, out_path: Path) -> Path:
             cur = test
     if cur:
         lines.append(cur)
-    line_h = 56
+    line_h = 64
     total_h = line_h * len(lines)
-    img = Image.new("RGBA", (W, total_h + 20), (0, 0, 0, 0))
+    img = Image.new("RGBA", (W, total_h + 30), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
     y = 0
     for line in lines:
@@ -163,9 +156,9 @@ def _subtitle_image(text: str, out_path: Path) -> Path:
         tw = bbox[2] - bbox[0]
         x = (W - tw) // 2
         # Stroke (black outline) + white fill
-        for dx in range(-2, 3):
-            for dy in range(-2, 3):
-                draw.text((x + dx, y + dy), line, fill=(0, 0, 0, 220), font=font)
+        for dx in range(-3, 4):
+            for dy in range(-3, 4):
+                draw.text((x + dx, y + dy), line, fill=(0, 0, 0, 230), font=font)
         draw.text((x, y), line, fill=(255, 255, 255, 255), font=font)
         y += line_h
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -210,7 +203,7 @@ def build_video(story_path: Path, images_dir: Path, audio_dir: Path,
         _subtitle_image(scene["narration"], sub_path)
         txt_clip = (ImageClip(str(sub_path))
                     .with_duration(dur)
-                    .with_position(("center", H - 280)))
+                    .with_position(("center", H - 200)))
 
         comp = CompositeVideoClip([base, txt_clip], size=(W, H))
         comp = comp.with_effects([FadeIn(0.3), FadeOut(0.3)])
