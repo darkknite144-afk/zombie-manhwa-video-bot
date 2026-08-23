@@ -4,9 +4,10 @@ Image generator — generates high-quality manhwa-style panels per scene.
 Primary: NVIDIA NIM API (FLUX.1-dev) — higher quality, sharper lines.
 Fallback: Pollinations.ai (FLUX) — free, no API key, unlimited.
 
-Images are fetched at 1920x1080 (landscape, matching video output) for
-maximum quality. Retries with exponential backoff. Deterministic seed per
-scene keeps visuals consistent across runs.
+Images are generated at the best landscape resolution supported by both
+NVIDIA NIM (1344x768) and Pollinations (1920x1080). Retries with
+exponential backoff. Deterministic seed per scene keeps visuals
+consistent across runs.
 """
 
 from __future__ import annotations
@@ -23,8 +24,12 @@ from PIL import Image
 
 POLLINATIONS_URL = "https://image.pollinations.ai/prompt/{prompt}"
 NVIDIA_URL = "https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux.1-dev"
-WIDTH = int(os.environ.get("IMG_WIDTH", "1920"))
-HEIGHT = int(os.environ.get("IMG_HEIGHT", "1080"))
+# NVIDIA FLUX.1-dev only accepts these dimensions: 768, 832, 896, 960,
+# 1024, 1088, 1152, 1216, 1280, 1344. Best 16:9 landscape combo is 1344x768.
+NVIDIA_WIDTH = 1344
+NVIDIA_HEIGHT = 768
+POLLINATIONS_WIDTH = int(os.environ.get("IMG_WIDTH", "1920"))
+POLLINATIONS_HEIGHT = int(os.environ.get("IMG_HEIGHT", "1080"))
 TIMEOUT = 120
 NVIDIA_API_KEY = os.environ.get("NVIDIA_API_KEY", "")
 
@@ -45,8 +50,8 @@ def _fetch_nvidia(prompt: str, dest: Path, seed: int) -> bool:
         "cfg_scale": 4.5,
         "steps": 30,
         "seed": seed,
-        "width": WIDTH,
-        "height": HEIGHT,
+        "width": NVIDIA_WIDTH,
+        "height": NVIDIA_HEIGHT,
     }
 
     for attempt in range(1, 4):
@@ -74,7 +79,8 @@ def _fetch_nvidia(prompt: str, dest: Path, seed: int) -> bool:
                         with Image.open(dest) as im:
                             im.verify()
                         print(f"[image_gen] NVIDIA OK {dest.name} "
-                              f"(attempt {attempt}, {len(img_bytes)} bytes)")
+                              f"(attempt {attempt}, {len(img_bytes)} bytes, "
+                              f"{NVIDIA_WIDTH}x{NVIDIA_HEIGHT})")
                         return True
 
             print(f"[image_gen] NVIDIA {dest.name} attempt {attempt}: "
@@ -91,7 +97,7 @@ def _fetch_nvidia(prompt: str, dest: Path, seed: int) -> bool:
 def _fetch_pollinations(prompt: str, dest: Path, seed: int) -> bool:
     """Generate image via Pollinations.ai FLUX (free, no key)."""
     url = POLLINATIONS_URL.format(prompt=requests.utils.quote(prompt))
-    url += f"?width={WIDTH}&height={HEIGHT}&seed={seed}&nologo=true&model=flux"
+    url += f"?width={POLLINATIONS_WIDTH}&height={POLLINATIONS_HEIGHT}&seed={seed}&nologo=true&model=flux"
     for attempt in range(1, 6):
         try:
             r = requests.get(url, timeout=TIMEOUT)
@@ -148,7 +154,7 @@ def generate_images(story_path: Path, out_dir: Path) -> list[Path]:
             print(f"[image_gen] OK {dest.name}")
         else:
             # Last resort: placeholder
-            Image.new("RGB", (WIDTH, HEIGHT), (15, 15, 20)).save(dest, "JPEG")
+            Image.new("RGB", (NVIDIA_WIDTH, NVIDIA_HEIGHT), (15, 15, 20)).save(dest, "JPEG")
             results.append(dest)
             print(f"[image_gen] WARNING placeholder for {dest.name}")
     return results
